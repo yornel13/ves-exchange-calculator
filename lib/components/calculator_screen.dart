@@ -17,8 +17,6 @@ class CalculatorScreen extends StatefulWidget {
 class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBindingObserver {
   String? _backgroundImagePath;
   bool _isButtonTransparent = false;
-  String _selectedOption = 'Calculadora';
-  final List<String> _options = ['Calculadora', 'Cambio Monetario'];
 
       @override
   void initState() {
@@ -64,6 +62,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
                       const SizedBox(height: 16),
                       Row(
                         children: [
+                          // Lista izquierda: incluye "Personalizado"
                           Expanded(
                             child: Column(
                               children: _exchangeOptions.map((option) {
@@ -156,7 +155,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
                           ),
                           Expanded(
                             child: Column(
-                              children: _exchangeOptions.map((option) {
+                              children: _exchangeOptionsRight.map((option) {
                                 final bool isSelected = tempTo == option;
                                 final bool isDisabled = tempFrom == option;
                                 return Padding(
@@ -243,7 +242,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
                             setState(() {
                               _fromExchangeType = tempFrom;
                               _toExchangeType = tempTo;
-                              _currencyField3 = '0.00';
                             });
                             Navigator.of(context).pop();
                           },
@@ -285,88 +283,30 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
   String _expression = '';
   String _result = '';
 
-  // Campos para el modo Cambio Monetario
-  String _currencyField1 = '0.00';
-  String _currencyField2 = '0.00';
-  String _currencyField3 = '0.00';
-  int _activeCurrencyField = 1; // 1, 2 o 3
-  String _fromExchangeType = 'BCV';
-  String _toExchangeType = 'USD';
-  final List<String> _exchangeOptions = ['BCV', 'Euro', 'USD', 'USDT'];
+  String _fromExchangeType = 'BCV'; // valor seleccionado lista 1 (izquierda)
+  String _toExchangeType = 'USD';   // valor seleccionado lista 2 (derecha)
+  // Opciones para la lista izquierda (incluye "Personalizado"), ordenadas alfabéticamente
+  final List<String> _exchangeOptions = [
+    'BCV',
+    'Euro',
+    'Personalizado',
+    'USD',
+    'USDT',
+  ];
+  // Opciones para la lista derecha (sin "Personalizado"), ordenadas alfabéticamente
+  final List<String> _exchangeOptionsRight = [
+    'BCV',
+    'Euro',
+    'USD',
+    'USDT',
+  ];
 
-  void _showOptionsDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20.0),
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(20.0),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Seleccionar Modo',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ..._options.map((option) {
-                    bool isSelected = _selectedOption == option;
-                    return InkWell(
-                      onTap: () {
-                        setState(() {
-                          _selectedOption = option;
-                        });
-                        Navigator.of(context).pop();
-                      },
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 12.0),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Theme.of(context).highlightColor
-                              : null,
-                          borderRadius: BorderRadius.circular(10.0),
-                          border: const Border(
-                            bottom: BorderSide(
-                              color: Colors.black12,
-                              width: 0.5,
-                            ),
-                          ),
-                        ),
-                        child: Center(
-                          child: Text(
-                            option,
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              fontSize: 18,
-                              fontWeight: isSelected ? FontWeight.w900 : FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
+  void _swapExchangeTypes() {
+    setState(() {
+      final temp = _fromExchangeType;
+      _fromExchangeType = _toExchangeType;
+      _toExchangeType = temp;
+    });
   }
 
   void _buttonPressed(String buttonText) {
@@ -432,64 +372,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
       buffer = ch + buffer;
     }
     return buffer;
-  }
-
-  void _currencyButtonPressed(String buttonText) {
-    setState(() {
-      // El campo 3 es solo de resultado, no debe permitir escritura desde el teclado
-      if (_activeCurrencyField == 3) {
-        return;
-      }
-
-      String current;
-      switch (_activeCurrencyField) {
-        case 1:
-          current = _currencyField1;
-          break;
-        case 2:
-          current = _currencyField2;
-          break;
-        case 3:
-          current = _currencyField3;
-          break;
-        default:
-          current = _currencyField1;
-      }
-
-      if (buttonText == 'DEL') {
-        if (current.isNotEmpty) {
-          current = current.substring(0, current.length - 1);
-        }
-      } else {
-        // Limitar a un solo punto decimal
-        if (buttonText == '.' && current.contains('.')) {
-          return;
-        }
-
-        // Limitar a 2 decimales después del punto
-        if (current.contains('.')) {
-          final dotIndex = current.indexOf('.');
-          final decimals = current.length - dotIndex - 1;
-          if (decimals >= 2 && buttonText != 'DEL' && buttonText != '.') {
-            return;
-          }
-        }
-
-        current += buttonText;
-      }
-
-      switch (_activeCurrencyField) {
-        case 1:
-          _currencyField1 = current;
-          break;
-        case 2:
-          _currencyField2 = current;
-          break;
-        case 3:
-          _currencyField3 = current;
-          break;
-      }
-    });
   }
 
   Widget _buildButton(String buttonText, {int flex = 1}) {
@@ -599,90 +481,13 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
     );
   }
 
-    Widget _buildCurrencyExchangeKeyboard() {
-    return Column(
-      children: [
-        Row(
-          children: <Widget>[
-            _buildCurrencyButton('7'),
-            _buildCurrencyButton('8'),
-            _buildCurrencyButton('9'),
-          ],
-        ),
-        Row(
-          children: <Widget>[
-            _buildCurrencyButton('4'),
-            _buildCurrencyButton('5'),
-            _buildCurrencyButton('6'),
-          ],
-        ),
-        Row(
-          children: <Widget>[
-            _buildCurrencyButton('1'),
-            _buildCurrencyButton('2'),
-            _buildCurrencyButton('3'),
-          ],
-        ),
-        Row(
-          children: <Widget>[
-            _buildCurrencyButton('.'),
-            _buildCurrencyButton('0'),
-            _buildCurrencyButton('DEL'),
-          ],
-        ),
-      ],
-    );
-  }
-
-    Widget _buildCurrencyButton(String buttonText, {int flex = 1}) {
-    return Expanded(
-      flex: flex,
-      child: Padding(
-        padding: const EdgeInsets.all(4.0),
-        child: AspectRatio(
-          aspectRatio: 1 / 0.95,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12.0),
-              ),
-              backgroundColor: _isButtonTransparent
-                  ? Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4)
-                  : Theme.of(context).colorScheme.surfaceVariant,
-              foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-            child: buttonText == "DEL"
-                ? const Icon(Icons.backspace, size: 24.0)
-                : Text(
-                    buttonText,
-                    style: const TextStyle(
-                      fontSize: 24.0,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-            onPressed: () => _currencyButtonPressed(buttonText),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.more_vert),
-              onPressed: _showOptionsDialog,
-            ),
-            const SizedBox(width: 16),
-            Text(
-              _selectedOption,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-          ],
+        title: const Text(
+          'Calculadora',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
@@ -726,42 +531,129 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
                   child: Padding(
                     // Solo separación inferior; el padding externo de 16 ya maneja los bordes laterales
                     padding: const EdgeInsets.fromLTRB(0.0, 0.0, 0.0, 8.0),
-                    child: _selectedOption == 'Calculadora'
-                        // Modo Calculadora: container con 5 filas de colores diferenciados
-                        ? Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceVariant,
-                              borderRadius: BorderRadius.circular(8.0),
-                            ),
-                            child: Column(
-                              children: [
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceVariant,
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      child: Column(
+                        children: [
                                 // Fila 1
                                 Expanded(
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 8.0,
                                     ),
-                                    alignment: Alignment.centerRight,
-                                    child: const Text(
-                                      '1',
-                                      style: TextStyle(fontSize: 12),
+                                    alignment: Alignment.center,
+                                    child: Stack(
+                                      children: [
+                                        // Fila de ancho completo: texto izq, botón, texto der
+                                        Align(
+                                          alignment: Alignment.center,
+                                          child: Row(
+                                            children: [
+                                              // Texto izquierda dentro de Expanded
+                                              Expanded(
+                                                child: Align(
+                                                  alignment: Alignment.centerRight,
+                                                  child: Text(
+                                                    _fromExchangeType,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w500,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              // Botón centrado geométricamente
+                                              SizedBox(
+                                                width: 40,
+                                                height: 32,
+                                                child: Material(
+                                                  color: Colors.transparent,
+                                                  child: InkWell(
+                                                    borderRadius:
+                                                        BorderRadius.circular(8.0),
+                                                    onTap: _swapExchangeTypes,
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .onSurface
+                                                            .withOpacity(0.10),
+                                                        borderRadius:
+                                                            BorderRadius.circular(8.0),
+                                                      ),
+                                                      child: Center(
+                                                        child: Icon(
+                                                          Icons.compare_arrows,
+                                                          size: 18,
+                                                          color: Theme.of(context)
+                                                              .colorScheme
+                                                              .onSurface,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              // Texto derecha dentro de Expanded
+                                              Expanded(
+                                                child: Align(
+                                                  alignment: Alignment.centerLeft,
+                                                  child: Text(
+                                                    _toExchangeType,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w500,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // Número de la fila en la esquina derecha
+                                        const Align(
+                                          alignment: Alignment.centerRight,
+                                          child: Text(
+                                            '1',
+                                            style: TextStyle(fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
-                                // Separador entre fila 1 y 2 (fino)
+                                // Separador entre fila 1 y 2 (fino, 50% del ancho y centrado)
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 15.0,
                                   ),
-                                  child: Divider(
-                                    height: 1,
-                                    thickness: 1,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurface
-                                        .withOpacity(0.15),
+                                  child: Center(
+                                    child: FractionallySizedBox(
+                                      widthFactor: 0.5,
+                                      child: Divider(
+                                        height: 1,
+                                        thickness: 1,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurface
+                                            .withOpacity(0.15),
+                                      ),
+                                    ),
                                   ),
                                 ),
 
@@ -956,192 +848,13 @@ class _CalculatorScreenState extends State<CalculatorScreen> with WidgetsBinding
                                 ),
                               ],
                             ),
-                          )
-                        // Modo Cambio Monetario: contenedor con padding y contenido interno
-                        : Container(
-                            padding: const EdgeInsets.all(16.0),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceVariant,
-                              borderRadius: BorderRadius.circular(8.0),
-                            ),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                            TextField(
-                              readOnly: true,
-                              textAlign: TextAlign.center,
-                              onTap: () {
-                                setState(() {
-                                  _activeCurrencyField = 1;
-                                });
-                              },
-                              decoration: InputDecoration(
-                                labelText: 'Personalizado',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(30.0),
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 8.0,
-                                  horizontal: 16.0,
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(30.0),
-                                  borderSide: BorderSide(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary,
-                                  ),
-                                ),
-                              ),
-                              controller: TextEditingController(
-                                text: _currencyField1,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              readOnly: true,
-                              textAlign: TextAlign.center,
-                              onTap: () {
-                                setState(() {
-                                  _activeCurrencyField = 2;
-                                });
-                              },
-                              decoration: InputDecoration(
-                                labelText: _fromExchangeType,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(30.0),
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 8.0,
-                                  horizontal: 16.0,
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(30.0),
-                                  borderSide: BorderSide(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary,
-                                  ),
-                                ),
-                              ),
-                              controller: TextEditingController(
-                                text: _currencyField2.isEmpty
-                                    ? ''
-                                    : '$_currencyField2 $_fromExchangeType',
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Center(
-                              child: SizedBox(
-                                height: 30,
-                                width: 30,
-                                child: IconButton(
-                                  padding: EdgeInsets.zero,
-                                  splashRadius: 18,
-                                  onPressed: _showExchangeTypeDialog,
-                                  icon: Icon(
-                                    Icons.sync,
-                                    size: 26,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurface,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              readOnly: true,
-                              textAlign: TextAlign.center,
-                              onTap: () {
-                                setState(() {
-                                  _activeCurrencyField = 3;
-                                });
-                              },
-                              decoration: InputDecoration(
-                                labelText: _toExchangeType,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(30.0),
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 8.0,
-                                  horizontal: 16.0,
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(30.0),
-                                  borderSide: BorderSide(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary,
-                                  ),
-                                ),
-                              ),
-                              controller: TextEditingController(
-                                text: _currencyField3.isEmpty
-                                    ? ''
-                                    : '$_currencyField3 $_toExchangeType',
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Center(
-                              child: SizedBox(
-                                height: 28,
-                                child: ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16.0,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20.0),
-                                    ),
-                                    backgroundColor: Colors.green,
-                                    foregroundColor: Colors.white,
-                                    elevation: 2,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _currencyField1 = '0.00';
-                                      _currencyField2 = '0.00';
-                                      _currencyField3 = '0.00';
-                                      _activeCurrencyField = 1;
-                                    });
-                                  },
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      Text(
-                                        'Reiniciar',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      SizedBox(width: 6),
-                                      Icon(
-                                        Icons.refresh,
-                                        size: 16,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                              ],
-                            ),
                           ),
                   ),
                 ),
                 const Divider(),
                 Expanded(
                   flex: 3,
-                  child: _selectedOption == 'Calculadora'
-                      ? _buildCalculatorKeyboard()
-                      : Align(
-                          alignment: Alignment.bottomCenter,
-                          child: _buildCurrencyExchangeKeyboard(),
-                        ),
+                  child: _buildCalculatorKeyboard(),
                 ),
               ],
             ),
