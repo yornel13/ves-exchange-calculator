@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smart_calculator/components/calculator_screen.dart';
 
 void main() {
@@ -13,11 +14,45 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  ThemeMode _themeMode = ThemeMode.dark;
+  ThemeMode _themeMode = ThemeMode.system;
+  static const _kThemeModeKey = 'themeMode';
 
-  void _toggleTheme() {
+  @override
+  void initState() {
+    super.initState();
+    _loadThemeMode();
+  }
+
+  Future<void> _loadThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? stored = prefs.getString(_kThemeModeKey);
     setState(() {
-      _themeMode = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+      if (stored == 'light') {
+        _themeMode = ThemeMode.light;
+      } else if (stored == 'dark') {
+        _themeMode = ThemeMode.dark;
+      } else if (stored == 'system') {
+        _themeMode = ThemeMode.system;
+      } else {
+        _themeMode = ThemeMode.system;
+      }
+    });
+  }
+
+  void _setThemeMode(ThemeMode mode) {
+    setState(() {
+      _themeMode = mode;
+    });
+
+    SharedPreferences.getInstance().then((prefs) async {
+      await prefs.setString(
+        _kThemeModeKey,
+        _themeMode == ThemeMode.light
+            ? 'light'
+            : _themeMode == ThemeMode.dark
+                ? 'dark'
+                : 'system',
+      );
     });
   }
 
@@ -29,7 +64,10 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData.light(),
       darkTheme: ThemeData.dark(),
       themeMode: _themeMode,
-      home: CalculatorScreen(onThemeChanged: _toggleTheme),
+      home: CalculatorScreen(
+        themeMode: _themeMode,
+        onThemeModeChanged: _setThemeMode,
+      ),
     );
   }
 }
