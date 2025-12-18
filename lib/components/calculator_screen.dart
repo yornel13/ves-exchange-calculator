@@ -282,6 +282,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       final service = RateService();
       final rates = await service.fetchRates();
 
+      // ignore: avoid_print
+      print('Rates fetched: USD=${rates.usdVes}, EUR=${rates.eurVes}, USDT=${rates.usdtVes}');
+
       // Comparar con los últimos valores oficiales guardados para detectar cambios
       final prefs = await SharedPreferences.getInstance();
       final double? lastUsd = prefs.getDouble(_kLastOfficialUsdKey);
@@ -303,7 +306,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         await prefs.setBool(_kHasNewOfficialRatesKey, true);
       }
 
-      // Actualizar siempre los valores oficiales guardados
+      // Actualizar siempre los valores oficiales guardados cuando son válidos
       if (rates.usdVes > 0) {
         await prefs.setDouble(_kLastOfficialUsdKey, rates.usdVes);
       }
@@ -314,40 +317,51 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         await prefs.setDouble(_kLastOfficialUsdtKey, rates.usdtVes);
       }
 
-      // Registrar momento de esta actualización de montos oficiales
-      await prefs.setInt(
-        _kLastRatesUpdateTimestampKey,
-        DateTime.now().millisecondsSinceEpoch,
-      );
-
-      setState(() {
-        for (final c in _currencyOptions) {
-          if (c.code == 'USD' && rates.usdVes > 0) {
-            c.value = rates.usdVes;
-          } else if (c.code == 'Euro' && rates.eurVes > 0) {
-            c.value = rates.eurVes;
-          } else if (c.code == 'USDT' && rates.usdtVes > 0) {
-            c.value = rates.usdtVes;
-          }
-        }
-      });
-
-      await _applyOverridesFromPrefs();
-
-      // Mostrar confirmación de actualización solo cuando realmente
-      // consultamos montos oficiales desde el backend.
-      if (mounted && showSnackBar) {
-        // Quitar el SnackBar de loading, si estaba activo.
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Tasas monetarias actualizadas'),
-            duration: Duration(seconds: 2),
-          ),
+      // Registrar momento de esta actualización
+      if (rates.usdVes > 0 || rates.eurVes > 0 || rates.usdtVes > 0) {
+        await prefs.setInt(
+          _kLastRatesUpdateTimestampKey,
+          DateTime.now().millisecondsSinceEpoch,
         );
       }
-    } catch (_) {
-      // En caso de error de red, se mantienen los valores por defecto
+
+      // SIEMPRE setear los valores cuando el servicio retorna datos válidos
+      if (mounted) {
+        setState(() {
+          for (final c in _currencyOptions) {
+            if (c.code == 'USD' && rates.usdVes > 0) {
+              c.value = rates.usdVes;
+              // ignore: avoid_print
+              print('USD rate set to: ${rates.usdVes}');
+            } else if (c.code == 'Euro' && rates.eurVes > 0) {
+              c.value = rates.eurVes;
+              // ignore: avoid_print
+              print('EUR rate set to: ${rates.eurVes}');
+            } else if (c.code == 'USDT' && rates.usdtVes > 0) {
+              c.value = rates.usdtVes;
+              // ignore: avoid_print
+              print('USDT rate set to: ${rates.usdtVes}');
+            }
+          }
+        });
+
+        await _applyOverridesFromPrefs();
+
+        // Mostrar confirmación solo cuando hay valores válidos
+        if (showSnackBar && (rates.usdVes > 0 || rates.eurVes > 0 || rates.usdtVes > 0)) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Tasas monetarias actualizadas'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('Error loading rates: $e');
+      // En caso de error de red, las tasas quedan en 1.0 (valores por defecto)
     } finally {
       if (mounted) {
         setState(() {
@@ -1033,6 +1047,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   void _buttonPressed(String buttonText) {
+    // Feedback háptico en cada pulsación de botón
+    HapticFeedback.lightImpact();
+
     setState(() {
       if (buttonText == 'C') {
         _expression = '';
@@ -1127,13 +1144,20 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           ContextModel cm = ContextModel();
           double eval = exp.evaluate(EvaluationType.REAL, cm);
 
+          // Detectar división por cero (resultado infinito o NaN)
+          if (eval.isInfinite || eval.isNaN) {
+            _result = 'División por cero';
+            _justEvaluated = true;
+            return;
+          }
+
           _result = eval.toString();
           if (_result.endsWith('.0')) {
             _result = _result.substring(0, _result.length - 2);
           }
 
           // Guardar en historial si el resultado es válido
-          if (_result.isNotEmpty && _result != 'Error') {
+          if (_result.isNotEmpty && _result != 'Error' && _result != 'División por cero') {
             final String opType = _inferOperationType(_expression);
             HistoryService.addEntry(
               expression: _expression,
@@ -1155,7 +1179,8 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         if (_justEvaluated) {
           if (_isOperator(buttonText) &&
               _result.isNotEmpty &&
-              _result != 'Error') {
+              _result != 'Error' &&
+              _result != 'División por cero') {
             // Continuar desde el resultado anterior: resultado + operador
             _expression = _result;
             // seguimos abajo para agregar el operador
@@ -1233,8 +1258,34 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     return buffer;
   }
 
+  bool _isExpressionValid() {
+    if (_expression.isEmpty) return true;
+
+    // Verificar si termina con un operador (excepto %)
+    final lastChar = _expression[_expression.length - 1];
+    if (_isOperator(lastChar)) {
+      return false;
+    }
+
+    // Verificar múltiples puntos decimales en un número
+    final currentNumber = _getCurrentNumber(_expression);
+    final dotCount = currentNumber.split('.').length - 1;
+    if (dotCount > 1) {
+      return false;
+    }
+
+    // Verificar operadores consecutivos
+    for (int i = 0; i < _expression.length - 1; i++) {
+      if (_isOperator(_expression[i]) && _isOperator(_expression[i + 1])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   Future<void> _copyToClipboard(String value, String message) async {
-    if (value.isEmpty || value == 'Error') return;
+    if (value.isEmpty || value == 'Error' || value == 'División por cero') return;
     await Clipboard.setData(ClipboardData(text: value));
     if (!mounted) return;
     final colorScheme = Theme.of(context).colorScheme;
@@ -1909,9 +1960,12 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                 child: Text(
                                   _formatExpressionForDisplay(_expression),
                                   textAlign: TextAlign.right,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 24,
                                     fontWeight: FontWeight.w500,
+                                    color: _isExpressionValid()
+                                        ? null // Color por defecto del tema
+                                        : Colors.orange.withOpacity(0.8), // Color de advertencia
                                   ),
                                 ),
                               ),
