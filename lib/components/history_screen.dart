@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:smart_calculator/services/history_service.dart';
+import 'package:ves_exchange_calculator/services/history_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});

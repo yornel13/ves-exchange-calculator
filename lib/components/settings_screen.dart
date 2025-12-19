@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:smart_calculator/services/rate_service.dart';
+import 'package:ves_exchange_calculator/services/rate_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final double initialUsdRate;

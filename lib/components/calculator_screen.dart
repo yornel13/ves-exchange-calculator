@@ -8,10 +8,10 @@ import 'package:share_plus/share_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:math_expressions/math_expressions.dart' hide Stack;
-import 'package:smart_calculator/components/settings_screen.dart';
-import 'package:smart_calculator/components/history_screen.dart';
-import 'package:smart_calculator/services/rate_service.dart';
-import 'package:smart_calculator/services/history_service.dart';
+import 'package:ves_exchange_calculator/components/settings_screen.dart';
+import 'package:ves_exchange_calculator/components/history_screen.dart';
+import 'package:ves_exchange_calculator/services/rate_service.dart';
+import 'package:ves_exchange_calculator/services/history_service.dart';
 import 'package:path_provider/path_provider.dart';
 
 class CurrencyOption {
