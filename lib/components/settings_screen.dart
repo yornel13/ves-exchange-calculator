@@ -282,21 +282,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         prefs.getInt(_kLastRatesUpdateTimestampKey);
 
     setState(() {
-      // Actualizar montos oficiales en memoria
+      // Actualizar montos oficiales en memoria SOLAMENTE
+      // NO actualizar los TextFields para que los botones se activen
       _officialUsd = usd ?? _officialUsd;
       _officialEur = eur ?? _officialEur;
       _officialUsdt = usdt ?? _officialUsdt;
-
-      // Actualizar controles visibles con los nuevos valores
-      if (usd != null && usd > 0) {
-        _usdController.text = usd.toStringAsFixed(2);
-      }
-      if (eur != null && eur > 0) {
-        _eurController.text = eur.toStringAsFixed(2);
-      }
-      if (usdt != null && usdt > 0) {
-        _usdtController.text = usdt.toStringAsFixed(2);
-      }
 
       // Actualizar fecha de última actualización si existe
       if (lastUpdateMs != null && lastUpdateMs > 0) {
@@ -304,46 +294,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             DateTime.fromMillisecondsSinceEpoch(lastUpdateMs);
       }
     });
-
-    final colorScheme = Theme.of(context).colorScheme;
-
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.check_rounded,
-              size: 18,
-              color: colorScheme.onInverseSurface,
-            ),
-            const SizedBox(width: 8),
-            const Flexible(
-              child: Text(
-                'Hay nuevos montos monetarios disponibles',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: colorScheme.inverseSurface.withOpacity(0.95),
-        behavior: SnackBarBehavior.floating,
-        elevation: 4,
-        duration: const Duration(seconds: 2),
-        margin: const EdgeInsets.symmetric(
-          horizontal: 24.0,
-          vertical: 16.0,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16.0),
-        ),
-      ),
-    );
   }
 
   Future<void> _saveSingleRate({

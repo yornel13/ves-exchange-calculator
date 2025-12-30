@@ -73,11 +73,10 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Cargar preferencias (incluye modo de inicio) y, una vez cargadas,
-    // inicializar tasas solo si el modo actual es "Cambio Monetario".
+    // Cargar preferencias y luego inicializar tasas SIEMPRE (independiente del modo)
     _loadPreferences().then((_) {
       if (!mounted) return;
-      _initRatesIfMonetaryMode();
+      _initRatesOnStartup();
     });
     _setupGlobalRatesScheduler();
   }
@@ -148,6 +147,135 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   Future<void> _saveStartupMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kStartupModeKey, mode);
+  }
+
+  Future<void> _initRatesOnStartup() async {
+    try {
+      final bool isMonetaryMode = _selectedMode == 'Cambio Monetario';
+
+      setState(() {
+        _isLoadingRates = true;
+      });
+
+      // Solo mostrar SnackBar de carga si estamos en modo Cambio Monetario
+      if (mounted && isMonetaryMode) {
+        final colorScheme = Theme.of(context).colorScheme;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(colorScheme.onInverseSurface),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    'Consultando tasas monetarias...',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colorScheme.onInverseSurface,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: colorScheme.inverseSurface.withOpacity(0.95),
+            behavior: SnackBarBehavior.floating,
+            elevation: 4,
+            duration: const Duration(seconds: 15),
+            margin: const EdgeInsets.symmetric(
+              horizontal: 24.0,
+              vertical: 16.0,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16.0),
+            ),
+          ),
+        );
+      }
+
+      // Ejecutar el servicio SIEMPRE (independiente del modo)
+      await _loadRatesFromPrefs();
+
+      if (!mounted) return;
+
+      await _applyOverridesFromPrefs();
+
+      // Verificar si hay nuevos valores y mostrar toast
+      await _checkAndShowNewRatesToast();
+    } catch (e) {
+      // Manejo de errores: si algo falla, ocultar el loading y continuar
+      // ignore: avoid_print
+      print('Error initializing rates: $e');
+    } finally {
+      // Asegurarse de que siempre se oculte el loading
+      if (mounted) {
+        setState(() {
+          _isLoadingRates = false;
+        });
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      }
+    }
+  }
+
+  Future<void> _checkAndShowNewRatesToast() async {
+    final prefs = await SharedPreferences.getInstance();
+    final bool hasNew = prefs.getBool(_kHasNewOfficialRatesKey) ?? false;
+
+    if (!hasNew || !mounted) return;
+
+    // Resetear el flag
+    await prefs.setBool(_kHasNewOfficialRatesKey, false);
+
+    // Mostrar toast indicando que hay nuevos valores
+    final colorScheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.check_rounded,
+              size: 18,
+              color: colorScheme.onInverseSurface,
+            ),
+            const SizedBox(width: 8),
+            const Flexible(
+              child: Text(
+                'Hay nuevos valores monetarios disponibles',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: colorScheme.inverseSurface.withOpacity(0.95),
+        behavior: SnackBarBehavior.floating,
+        elevation: 4,
+        duration: const Duration(seconds: 3),
+        margin: const EdgeInsets.symmetric(
+          horizontal: 24.0,
+          vertical: 16.0,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16.0),
+        ),
+      ),
+    );
   }
 
   Future<void> _initRatesIfMonetaryMode() async {
@@ -235,17 +363,15 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     final double? lastEur = prefs.getDouble(_kLastOfficialEurKey);
     final double? lastUsdt = prefs.getDouble(_kLastOfficialUsdtKey);
 
-    // Si no hay ningún valor oficial previo guardado, hacer una sola consulta
-    // inicial al backend para obtenerlos y guardarlos.
+    // Si no hay ningún valor oficial previo guardado, hacer consulta
+    // inicial al backend con reintentos para obtenerlos y guardarlos.
     final bool hasAnyStored = (lastUsd != null && lastUsd > 0) ||
         (lastEur != null && lastEur > 0) ||
         (lastUsdt != null && lastUsdt > 0);
 
     if (!hasAnyStored) {
-      // No había montos oficiales guardados: se delega a _loadRates
-      // que consultará al backend y se encargará de apagar el loading
-      // y de mostrar el SnackBar de confirmación.
-      await _loadRates();
+      // No había montos oficiales guardados: consultar al backend con reintentos
+      await _loadRatesWithRetry(maxAttempts: 3);
       return;
     }
 
@@ -271,6 +397,53 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     if (mounted) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
     }
+
+    // Aunque tengamos valores guardados, consultar al backend en segundo plano
+    // para verificar si hay nuevos valores (sin bloquear la UI)
+    _loadRatesWithRetry(maxAttempts: 3, silent: true);
+  }
+
+  Future<void> _loadRatesWithRetry({
+    int maxAttempts = 3,
+    bool silent = false,
+  }) async {
+    int attempt = 0;
+    bool success = false;
+
+    while (attempt < maxAttempts && !success) {
+      attempt++;
+      // ignore: avoid_print
+      print('Attempt $attempt of $maxAttempts to fetch rates...');
+
+      try {
+        await _loadRatesInternal(showSnackBar: !silent);
+        success = true;
+        // ignore: avoid_print
+        print('Rates fetched successfully on attempt $attempt');
+      } catch (e) {
+        // ignore: avoid_print
+        print('Attempt $attempt failed: $e');
+
+        if (attempt < maxAttempts) {
+          // Esperar un poco antes de reintentar (1 segundo)
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      }
+    }
+
+    if (!success) {
+      // ignore: avoid_print
+      print('Failed to fetch rates after $maxAttempts attempts');
+
+      // Si no se pudo obtener datos y no hay valores guardados,
+      // dejar los valores por defecto (1.0)
+      if (mounted) {
+        setState(() {
+          _isLoadingRates = false;
+        });
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      }
+    }
   }
 
   Future<void> _loadRates({bool showSnackBar = true}) async {
@@ -278,96 +451,145 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   Future<void> _loadRatesInternal({required bool showSnackBar}) async {
-    try {
-      final service = RateService();
-      final rates = await service.fetchRates();
+    final service = RateService();
+    final rates = await service.fetchRates();
 
-      // ignore: avoid_print
-      print('Rates fetched: USD=${rates.usdVes}, EUR=${rates.eurVes}, USDT=${rates.usdtVes}');
+    // ignore: avoid_print
+    print('Rates fetched: USD=${rates.usdVes}, EUR=${rates.eurVes}, USDT=${rates.usdtVes}');
 
-      // Comparar con los últimos valores oficiales guardados para detectar cambios
-      final prefs = await SharedPreferences.getInstance();
-      final double? lastUsd = prefs.getDouble(_kLastOfficialUsdKey);
-      final double? lastEur = prefs.getDouble(_kLastOfficialEurKey);
-      final double? lastUsdt = prefs.getDouble(_kLastOfficialUsdtKey);
+    // Verificar que se obtuvieron valores válidos
+    if (rates.usdVes <= 0 && rates.eurVes <= 0 && rates.usdtVes <= 0) {
+      throw Exception('No valid rates received from service');
+    }
 
-      bool hasNew = false;
-      if (rates.usdVes > 0 && (lastUsd == null || lastUsd != rates.usdVes)) {
-        hasNew = true;
-      }
-      if (rates.eurVes > 0 && (lastEur == null || lastEur != rates.eurVes)) {
-        hasNew = true;
-      }
-      if (rates.usdtVes > 0 && (lastUsdt == null || lastUsdt != rates.usdtVes)) {
-        hasNew = true;
-      }
+    // Comparar con los últimos valores oficiales guardados para detectar cambios
+    final prefs = await SharedPreferences.getInstance();
+    final double? lastUsd = prefs.getDouble(_kLastOfficialUsdKey);
+    final double? lastEur = prefs.getDouble(_kLastOfficialEurKey);
+    final double? lastUsdt = prefs.getDouble(_kLastOfficialUsdtKey);
 
-      if (hasNew) {
-        await prefs.setBool(_kHasNewOfficialRatesKey, true);
-      }
+    bool hasNew = false;
+    bool isFirstTime = (lastUsd == null && lastEur == null && lastUsdt == null);
 
-      // Actualizar siempre los valores oficiales guardados cuando son válidos
+    if (rates.usdVes > 0 && (lastUsd == null || lastUsd != rates.usdVes)) {
+      hasNew = true;
+    }
+    if (rates.eurVes > 0 && (lastEur == null || lastEur != rates.eurVes)) {
+      hasNew = true;
+    }
+    if (rates.usdtVes > 0 && (lastUsdt == null || lastUsdt != rates.usdtVes)) {
+      hasNew = true;
+    }
+
+    // Solo marcar como "nuevos valores" si NO es la primera vez
+    if (hasNew && !isFirstTime) {
+      await prefs.setBool(_kHasNewOfficialRatesKey, true);
+    }
+
+    // Guardar SIEMPRE los valores oficiales cuando son válidos
+    if (rates.usdVes > 0) {
+      await prefs.setDouble(_kLastOfficialUsdKey, rates.usdVes);
+    }
+    if (rates.eurVes > 0) {
+      await prefs.setDouble(_kLastOfficialEurKey, rates.eurVes);
+    }
+    if (rates.usdtVes > 0) {
+      await prefs.setDouble(_kLastOfficialUsdtKey, rates.usdtVes);
+    }
+
+    // Registrar momento de esta actualización
+    if (rates.usdVes > 0 || rates.eurVes > 0 || rates.usdtVes > 0) {
+      await prefs.setInt(
+        _kLastRatesUpdateTimestampKey,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    }
+
+    // Si es la primera vez, guardar también como overrides para que se usen inmediatamente
+    if (isFirstTime) {
       if (rates.usdVes > 0) {
-        await prefs.setDouble(_kLastOfficialUsdKey, rates.usdVes);
+        await prefs.setDouble(_kUsdOverrideKey, rates.usdVes);
       }
       if (rates.eurVes > 0) {
-        await prefs.setDouble(_kLastOfficialEurKey, rates.eurVes);
+        await prefs.setDouble(_kEurOverrideKey, rates.eurVes);
       }
       if (rates.usdtVes > 0) {
-        await prefs.setDouble(_kLastOfficialUsdtKey, rates.usdtVes);
+        await prefs.setDouble(_kUsdtOverrideKey, rates.usdtVes);
       }
+      await prefs.setInt(
+        _kOverridesTimestampKey,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    }
 
-      // Registrar momento de esta actualización
-      if (rates.usdVes > 0 || rates.eurVes > 0 || rates.usdtVes > 0) {
-        await prefs.setInt(
-          _kLastRatesUpdateTimestampKey,
-          DateTime.now().millisecondsSinceEpoch,
+    // SIEMPRE setear los valores en las variables cuando el servicio retorna datos válidos
+    if (mounted) {
+      setState(() {
+        for (final c in _currencyOptions) {
+          if (c.code == 'USD' && rates.usdVes > 0) {
+            c.value = rates.usdVes;
+            // ignore: avoid_print
+            print('USD rate set to: ${rates.usdVes}');
+          } else if (c.code == 'Euro' && rates.eurVes > 0) {
+            c.value = rates.eurVes;
+            // ignore: avoid_print
+            print('EUR rate set to: ${rates.eurVes}');
+          } else if (c.code == 'USDT' && rates.usdtVes > 0) {
+            c.value = rates.usdtVes;
+            // ignore: avoid_print
+            print('USDT rate set to: ${rates.usdtVes}');
+          }
+        }
+      });
+
+      await _applyOverridesFromPrefs();
+
+      // Mostrar confirmación solo cuando hay valores válidos y se pide mostrar SnackBar
+      if (showSnackBar && (rates.usdVes > 0 || rates.eurVes > 0 || rates.usdtVes > 0)) {
+        final colorScheme = Theme.of(context).colorScheme;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.check_rounded,
+                  size: 18,
+                  color: colorScheme.onInverseSurface,
+                ),
+                const SizedBox(width: 8),
+                const Flexible(
+                  child: Text(
+                    'Tasas monetarias actualizadas',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: colorScheme.inverseSurface.withOpacity(0.95),
+            behavior: SnackBarBehavior.floating,
+            elevation: 4,
+            duration: const Duration(seconds: 2),
+            margin: const EdgeInsets.symmetric(
+              horizontal: 24.0,
+              vertical: 16.0,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16.0),
+            ),
+          ),
         );
       }
 
-      // SIEMPRE setear los valores cuando el servicio retorna datos válidos
-      if (mounted) {
-        setState(() {
-          for (final c in _currencyOptions) {
-            if (c.code == 'USD' && rates.usdVes > 0) {
-              c.value = rates.usdVes;
-              // ignore: avoid_print
-              print('USD rate set to: ${rates.usdVes}');
-            } else if (c.code == 'Euro' && rates.eurVes > 0) {
-              c.value = rates.eurVes;
-              // ignore: avoid_print
-              print('EUR rate set to: ${rates.eurVes}');
-            } else if (c.code == 'USDT' && rates.usdtVes > 0) {
-              c.value = rates.usdtVes;
-              // ignore: avoid_print
-              print('USDT rate set to: ${rates.usdtVes}');
-            }
-          }
-        });
-
-        await _applyOverridesFromPrefs();
-
-        // Mostrar confirmación solo cuando hay valores válidos
-        if (showSnackBar && (rates.usdVes > 0 || rates.eurVes > 0 || rates.usdtVes > 0)) {
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Tasas monetarias actualizadas'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      // ignore: avoid_print
-      print('Error loading rates: $e');
-      // En caso de error de red, las tasas quedan en 1.0 (valores por defecto)
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingRates = false;
-        });
-      }
+      // Resetear loading state
+      setState(() {
+        _isLoadingRates = false;
+      });
     }
   }
 

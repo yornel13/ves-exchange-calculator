@@ -15,14 +15,14 @@ class ExchangeRates {
 }
 
 class RateService {
-  // Backend propio para evitar problemas de CORS
+  // Backend multi-backend con arquitectura de microservicios
   // NOTA: en emulador Android, "localhost" es el emulador; para llegar a tu PC usa 10.0.2.2
-  // Tasas BCV USD/VES y EUR/VES
+  // Tasas BCV USD/VES y EUR/VES desde Calculator Service
   static const _bcvBackendUrl =
-      'https://smart-calculator-backend-9ott.onrender.com/api/bcv/rates';
-  // Precio USDT/VES desde Binance P2P expuesto por el backend
+      'https://multi-backend-5bta.onrender.com/api/calculator/bcv/rates';
+  // Precio USDT/VES desde Binance P2P expuesto por Calculator Service
   static const _usdtBackendUrl =
-      'https://smart-calculator-backend-9ott.onrender.com/api/binance/usdt-p2p?asset=USDT&fiat=VES';
+      'https://multi-backend-5bta.onrender.com/api/calculator/binance/usdt-p2p?asset=USDT&fiat=VES';
 
   Future<ExchangeRates> fetchRates() async {
     final usdVes = await _fetchSingleFiat('USD');
