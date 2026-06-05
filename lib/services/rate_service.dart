@@ -15,14 +15,39 @@ class ExchangeRates {
 }
 
 class RateService {
-  // Backend propio para evitar problemas de CORS
-  // NOTA: en emulador Android, "localhost" es el emulador; para llegar a tu PC usa 10.0.2.2
-  // Tasas BCV USD/VES y EUR/VES
+  // ============================================================
+  // CONFIGURACIÓN DE URLs DEL BACKEND
+  // ============================================================
+  // Descomentar la línea correspondiente según el entorno:
+  // - LOCAL: Para desarrollo y pruebas locales
+  // - PRODUCCIÓN: Para la app en producción
+  //
+  // NOTA: En emulador Android, "localhost" es el emulador;
+  //       para llegar a tu PC usa 10.0.2.2
+  // ============================================================
+
+  // -------------------- URLs LOCALES (desarrollo) — ACTIVE --------------------
+  // Standalone backend (smart_calculator_backend) on port 3002.
+  // No '/api/calculator' prefix: there is no Gateway anymore, routes are at root.
+  // Desktop / iOS simulator / Flutter Web use 'localhost'.
+  // Android emulator must use '10.0.2.2' to reach the host machine.
   static const _bcvBackendUrl =
-      'https://smart-calculator-backend-9ott.onrender.com/api/bcv/rates';
-  // Precio USDT/VES desde Binance P2P expuesto por el backend
+      'http://localhost:3002/bcv/rates';
   static const _usdtBackendUrl =
-      'https://smart-calculator-backend-9ott.onrender.com/api/binance/usdt-p2p?asset=USDT&fiat=VES';
+      'http://localhost:3002/binance/usdt-p2p?asset=USDT&fiat=VES';
+
+  // Android emulator alternative:
+  // static const _bcvBackendUrl =
+  //     'http://10.0.2.2:3002/bcv/rates';
+  // static const _usdtBackendUrl =
+  //     'http://10.0.2.2:3002/binance/usdt-p2p?asset=USDT&fiat=VES';
+
+  // -------------------- URLs PRODUCCIÓN (legacy multi-backend) --------------------
+  // TODO: replace with the new standalone backend URL once deployed.
+  // static const _bcvBackendUrl =
+  //     'https://multi-backend-5bta.onrender.com/api/calculator/bcv/rates';
+  // static const _usdtBackendUrl =
+  //     'https://multi-backend-5bta.onrender.com/api/calculator/binance/usdt-p2p?asset=USDT&fiat=VES';
 
   Future<ExchangeRates> fetchRates() async {
     final usdVes = await _fetchSingleFiat('USD');

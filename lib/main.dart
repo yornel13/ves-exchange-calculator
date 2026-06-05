@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:smart_calculator/components/calculator_screen.dart';
+import 'package:ves_exchange_calculator/components/calculator_screen.dart';
 
 void main() {
   runApp(const MyApp());

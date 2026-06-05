@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:smart_calculator/services/rate_service.dart';
+import 'package:ves_exchange_calculator/services/rate_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final double initialUsdRate;
@@ -59,7 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Control para actualización automática silenciosa cada hora
   Timer? _autoRefreshTimer;
   Duration _timeToNextRefresh = Duration.zero;
-  int? _lastAutoUiRefreshHour;
+  bool _isAutoUpdating = false; // Evitar múltiples actualizaciones simultáneas
 
   String _startupMode = 'Calculadora';
 
@@ -87,22 +87,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       final current = DateTime.now();
 
-      // Próxima hora en punto a partir de la hora actual
-      final next =
-          DateTime(current.year, current.month, current.day, current.hour + 1);
-      final diff = next.difference(current);
+      // Si no hay última actualización registrada, mostrar 00:00:00
+      // y esperar a que se cargue desde SharedPreferences
+      if (_lastRatesUpdate == null) {
+        setState(() {
+          _timeToNextRefresh = Duration.zero;
+        });
+        return;
+      }
+
+      // Próxima actualización = última actualización + 1 hora
+      final nextUpdate = _lastRatesUpdate!.add(const Duration(hours: 1));
+      final diff = nextUpdate.difference(current);
 
       setState(() {
-        _timeToNextRefresh = diff;
+        _timeToNextRefresh = diff.isNegative ? Duration.zero : diff;
       });
 
-      // Cuando el contador llega (o pasa levemente) a 00:00, refrescar la
-      // sección de montos y "Última actualización" leyendo de SharedPreferences.
-      if (diff.inSeconds <= 0 && _lastAutoUiRefreshHour != current.hour) {
-        _lastAutoUiRefreshHour = current.hour;
-        // Recargar valores y última actualización sin bloquear la UI.
-        _loadMonetaryValues();
-        _checkForNewOfficialRates();
+      // Si ya pasó el tiempo (diff <= 0), disparar actualización automática
+      if (diff.inSeconds <= 0 && !_isAutoUpdating) {
+        _isAutoUpdating = true;
+        _performAutoUpdate();
       }
     }
 
@@ -112,6 +117,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       tick();
     });
+  }
+
+  Future<void> _performAutoUpdate() async {
+    try {
+      // Recargar valores y última actualización
+      await _loadMonetaryValues();
+      await _checkForNewOfficialRates();
+
+      // Si después de cargar aún no hay _lastRatesUpdate o ya pasó 1 hora,
+      // consultar tasas oficiales del servidor
+      if (_lastRatesUpdate == null ||
+          DateTime.now().difference(_lastRatesUpdate!).inMinutes >= 60) {
+        await _silentRefreshRates();
+      }
+    } finally {
+      _isAutoUpdating = false;
+    }
+  }
+
+  Future<void> _silentRefreshRates() async {
+    try {
+      final service = RateService();
+      final rates = await service.fetchRates();
+      final prefs = await SharedPreferences.getInstance();
+
+      bool hasChanges = false;
+
+      if (rates.usdVes > 0) {
+        await prefs.setDouble(_kLastOfficialUsdKey, rates.usdVes);
+        hasChanges = true;
+      }
+      if (rates.eurVes > 0) {
+        await prefs.setDouble(_kLastOfficialEurKey, rates.eurVes);
+        hasChanges = true;
+      }
+      if (rates.usdtVes > 0) {
+        await prefs.setDouble(_kLastOfficialUsdtKey, rates.usdtVes);
+        hasChanges = true;
+      }
+
+      if (hasChanges) {
+        // Actualizar timestamp de última actualización
+        await prefs.setInt(
+          _kLastRatesUpdateTimestampKey,
+          DateTime.now().millisecondsSinceEpoch,
+        );
+
+        // Marcar que hay nuevas tasas disponibles
+        await prefs.setBool('hasNewOfficialRates', true);
+
+        if (mounted) {
+          setState(() {
+            _lastRatesUpdate = DateTime.now();
+            _officialUsd = rates.usdVes > 0 ? rates.usdVes : _officialUsd;
+            _officialEur = rates.eurVes > 0 ? rates.eurVes : _officialEur;
+            _officialUsdt = rates.usdtVes > 0 ? rates.usdtVes : _officialUsdt;
+          });
+        }
+      }
+    } catch (_) {
+      // Silenciar errores en actualización automática
+    }
   }
 
   Future<void> _loadStartupMode() async {
@@ -281,69 +348,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final int? lastUpdateMs =
         prefs.getInt(_kLastRatesUpdateTimestampKey);
 
+    // Leer overrides actuales para verificar si el usuario personalizó
+    final double? overrideUsd = prefs.getDouble(_kUsdOverrideKey);
+    final double? overrideEur = prefs.getDouble(_kEurOverrideKey);
+    final double? overrideUsdt = prefs.getDouble(_kUsdtOverrideKey);
+
+    // Verificar si el usuario personalizó (override diferente al oficial anterior)
+    final bool hasCustomUsd = overrideUsd != null &&
+        overrideUsd > 0 &&
+        _officialUsd != null &&
+        overrideUsd != _officialUsd;
+    final bool hasCustomEur = overrideEur != null &&
+        overrideEur > 0 &&
+        _officialEur != null &&
+        overrideEur != _officialEur;
+    final bool hasCustomUsdt = overrideUsdt != null &&
+        overrideUsdt > 0 &&
+        _officialUsdt != null &&
+        overrideUsdt != _officialUsdt;
+
     setState(() {
       // Actualizar montos oficiales en memoria
       _officialUsd = usd ?? _officialUsd;
       _officialEur = eur ?? _officialEur;
       _officialUsdt = usdt ?? _officialUsdt;
 
-      // Actualizar controles visibles con los nuevos valores
-      if (usd != null && usd > 0) {
-        _usdController.text = usd.toStringAsFixed(2);
-      }
-      if (eur != null && eur > 0) {
-        _eurController.text = eur.toStringAsFixed(2);
-      }
-      if (usdt != null && usdt > 0) {
-        _usdtController.text = usdt.toStringAsFixed(2);
-      }
-
       // Actualizar fecha de última actualización si existe
       if (lastUpdateMs != null && lastUpdateMs > 0) {
         _lastRatesUpdate =
             DateTime.fromMillisecondsSinceEpoch(lastUpdateMs);
       }
+
+      // Actualizar TextFields solo si no hay valores personalizados
+      if (!hasCustomUsd && usd != null && usd > 0) {
+        _usdController.text = usd.toStringAsFixed(2);
+      }
+      if (!hasCustomEur && eur != null && eur > 0) {
+        _eurController.text = eur.toStringAsFixed(2);
+      }
+      if (!hasCustomUsdt && usdt != null && usdt > 0) {
+        _usdtController.text = usdt.toStringAsFixed(2);
+      }
     });
-
-    final colorScheme = Theme.of(context).colorScheme;
-
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.check_rounded,
-              size: 18,
-              color: colorScheme.onInverseSurface,
-            ),
-            const SizedBox(width: 8),
-            const Flexible(
-              child: Text(
-                'Hay nuevos montos monetarios disponibles',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: colorScheme.inverseSurface.withOpacity(0.95),
-        behavior: SnackBarBehavior.floating,
-        elevation: 4,
-        duration: const Duration(seconds: 2),
-        margin: const EdgeInsets.symmetric(
-          horizontal: 24.0,
-          vertical: 16.0,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16.0),
-        ),
-      ),
-    );
   }
 
   Future<void> _saveSingleRate({
@@ -561,6 +607,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final double? lastEur = prefs.getDouble(_kLastOfficialEurKey);
       final double? lastUsdt = prefs.getDouble(_kLastOfficialUsdtKey);
 
+      // Leer overrides actuales para verificar si el usuario personalizó
+      final double? currentOverrideUsd = prefs.getDouble(_kUsdOverrideKey);
+      final double? currentOverrideEur = prefs.getDouble(_kEurOverrideKey);
+      final double? currentOverrideUsdt = prefs.getDouble(_kUsdtOverrideKey);
+
+      // Verificar si el usuario personalizó (override diferente al oficial anterior)
+      final bool hasCustomUsd = currentOverrideUsd != null &&
+          currentOverrideUsd > 0 &&
+          lastUsd != null &&
+          currentOverrideUsd != lastUsd;
+      final bool hasCustomEur = currentOverrideEur != null &&
+          currentOverrideEur > 0 &&
+          lastEur != null &&
+          currentOverrideEur != lastEur;
+      final bool hasCustomUsdt = currentOverrideUsdt != null &&
+          currentOverrideUsdt > 0 &&
+          lastUsdt != null &&
+          currentOverrideUsdt != lastUsdt;
+
       bool hasChanges = false;
 
       if (rates.usdVes > 0 && (lastUsd == null || lastUsd != rates.usdVes)) {
@@ -576,6 +641,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
         hasChanges = true;
       }
 
+      // Si el usuario NO personalizó, actualizar overrides y TextFields
+      if (!hasCustomUsd && rates.usdVes > 0) {
+        await prefs.setDouble(_kUsdOverrideKey, rates.usdVes);
+      }
+      if (!hasCustomEur && rates.eurVes > 0) {
+        await prefs.setDouble(_kEurOverrideKey, rates.eurVes);
+      }
+      if (!hasCustomUsdt && rates.usdtVes > 0) {
+        await prefs.setDouble(_kUsdtOverrideKey, rates.usdtVes);
+      }
+
+      // Actualizar timestamp de overrides si se actualizó alguno
+      if ((!hasCustomUsd && rates.usdVes > 0) ||
+          (!hasCustomEur && rates.eurVes > 0) ||
+          (!hasCustomUsdt && rates.usdtVes > 0)) {
+        await prefs.setInt(
+          _kOverridesTimestampKey,
+          DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+
       // Registrar momento de esta actualización de montos oficiales
       await prefs.setInt(
         _kLastRatesUpdateTimestampKey,
@@ -584,23 +670,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (!mounted) return;
 
-      if (hasChanges) {
-        setState(() {
-          _officialUsd = rates.usdVes > 0 ? rates.usdVes : _officialUsd;
-          _officialEur = rates.eurVes > 0 ? rates.eurVes : _officialEur;
-          _officialUsdt = rates.usdtVes > 0 ? rates.usdtVes : _officialUsdt;
+      setState(() {
+        _officialUsd = rates.usdVes > 0 ? rates.usdVes : _officialUsd;
+        _officialEur = rates.eurVes > 0 ? rates.eurVes : _officialEur;
+        _officialUsdt = rates.usdtVes > 0 ? rates.usdtVes : _officialUsdt;
+        _lastRatesUpdate = DateTime.now();
 
-          _lastRatesUpdate = DateTime.now();
-        });
+        // Actualizar TextFields solo si no hay valores personalizados
+        if (!hasCustomUsd && rates.usdVes > 0) {
+          _usdController.text = rates.usdVes.toStringAsFixed(2);
+        }
+        if (!hasCustomEur && rates.eurVes > 0) {
+          _eurController.text = rates.eurVes.toStringAsFixed(2);
+        }
+        if (!hasCustomUsdt && rates.usdtVes > 0) {
+          _usdtController.text = rates.usdtVes.toStringAsFixed(2);
+        }
+      });
+
+      // Determinar mensaje según si hubo cambios y si se aplicaron
+      final bool anyAutoUpdated = (!hasCustomUsd && rates.usdVes > 0) ||
+          (!hasCustomEur && rates.eurVes > 0) ||
+          (!hasCustomUsdt && rates.usdtVes > 0);
+      final bool anyCustom = hasCustomUsd || hasCustomEur || hasCustomUsdt;
+
+      String message;
+      if (hasChanges && anyCustom && !anyAutoUpdated) {
+        message = 'Hay nuevos valores monetarios disponibles';
+      } else if (hasChanges && anyAutoUpdated) {
+        message = 'Valores monetarios actualizados.';
       } else {
-        setState(() {
-          _lastRatesUpdate = DateTime.now();
-        });
+        message = 'Valores monetarios actualizados.';
       }
-
-      final String message = hasChanges
-          ? 'Hay nuevos valores monetarios disponibles'
-          : 'Valores monetarios actualizados.';
 
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -911,10 +1012,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Configuraciones Generales'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: ListView(
-          children: [
+      body: ListView(
+        padding: EdgeInsets.only(
+          left: 16.0,
+          right: 16.0,
+          top: 16.0,
+          bottom: 24.0 + MediaQuery.of(context).viewPadding.bottom,
+        ),
+        children: [
             Card(
               elevation: 4.0,
               shape: RoundedRectangleBorder(
@@ -1148,238 +1253,319 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                       const SizedBox(height: 12.0),
-                      Row(
+                      // USD a VES
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _usdController,
-                              keyboardType:
-                              const TextInputType.numberWithOptions(
-                                decimal: true,
+                          Row(
+                            children: [
+                              const Text(
+                                'USD a VES',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                              inputFormatters: _twoDecimalInputFormatters,
-                              decoration: const InputDecoration(
-                                labelText: 'USD a VES',
-                                prefixText: 'USD: ',
-                                border: OutlineInputBorder(),
+                              const SizedBox(width: 6),
+                              Text(
+                                '(Oficial: ${_officialUsd?.toStringAsFixed(2) ?? '--'} Bs)',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
                               ),
-                            ),
+                            ],
                           ),
-                          const SizedBox(width: 12.0),
-                          SizedBox(
-                            height: 48,
-                            width: 48,
-                            child: Builder(
-                              builder: (context) {
-                                final scheme =
-                                    Theme.of(context).colorScheme;
-                                final isDark =
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark;
-                                final Color bg = isDark
-                                    ? scheme.primaryContainer
-                                    : scheme.primary;
-                                final Color iconColor = isDark
-                                    ? scheme.onPrimaryContainer
-                                    : scheme.onPrimary;
-
-                                bool isSameAsOfficial = false;
-                                if (_officialUsd != null) {
-                                  final currentText =
-                                  _usdController.text
-                                      .trim()
-                                      .replaceAll(',', '.');
-                                  final officialText =
-                                  _officialUsd!.toStringAsFixed(2);
-                                  isSameAsOfficial =
-                                      currentText == officialText;
-                                }
-
-                                return ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    backgroundColor: bg,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                      BorderRadius.circular(10.0),
-                                    ),
+                          const SizedBox(height: 8.0),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _usdController,
+                                  keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
                                   ),
-                                  onPressed:
-                                  isSameAsOfficial || _officialUsd == null
-                                      ? null
-                                      : () {
-                                    _restoreSingleToOfficial(
-                                      controller: _usdController,
-                                      officialValue: _officialUsd,
-                                      overrideKey: _kUsdOverrideKey,
-                                      currencyLabel: 'USD',
+                                  inputFormatters: _twoDecimalInputFormatters,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Personalizado',
+                                    prefixText: 'USD: ',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12.0),
+                              SizedBox(
+                                height: 48,
+                                width: 48,
+                                child: Builder(
+                                  builder: (context) {
+                                    final scheme =
+                                        Theme.of(context).colorScheme;
+                                    final isDark =
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark;
+                                    final Color bg = isDark
+                                        ? scheme.primaryContainer
+                                        : scheme.primary;
+                                    final Color iconColor = isDark
+                                        ? scheme.onPrimaryContainer
+                                        : scheme.onPrimary;
+
+                                    bool isSameAsOfficial = false;
+                                    if (_officialUsd != null) {
+                                      final currentText =
+                                      _usdController.text
+                                          .trim()
+                                          .replaceAll(',', '.');
+                                      final officialText =
+                                      _officialUsd!.toStringAsFixed(2);
+                                      isSameAsOfficial =
+                                          currentText == officialText;
+                                    }
+
+                                    return ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        padding: EdgeInsets.zero,
+                                        backgroundColor: bg,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                          BorderRadius.circular(10.0),
+                                        ),
+                                      ),
+                                      onPressed:
+                                      isSameAsOfficial || _officialUsd == null
+                                          ? null
+                                          : () {
+                                        _restoreSingleToOfficial(
+                                          controller: _usdController,
+                                          officialValue: _officialUsd,
+                                          overrideKey: _kUsdOverrideKey,
+                                          currencyLabel: 'USD',
+                                        );
+                                      },
+                                      child: Icon(
+                                        Icons.refresh_rounded,
+                                        size: 28,
+                                        color: iconColor,
+                                      ),
                                     );
                                   },
-                                  child: Icon(
-                                    Icons.refresh_rounded,
-                                    size: 28,
-                                    color: iconColor,
-                                  ),
-                                );
-                              },
-                            ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12.0),
-                      Row(
+                      const SizedBox(height: 16.0),
+                      // EUR a VES
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _eurController,
-                              keyboardType:
-                              const TextInputType.numberWithOptions(
-                                decimal: true,
+                          Row(
+                            children: [
+                              const Text(
+                                'EUR a VES',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                              inputFormatters: _twoDecimalInputFormatters,
-                              decoration: const InputDecoration(
-                                labelText: 'Euro a VES',
-                                prefixText: 'EUR: ',
-                                border: OutlineInputBorder(),
+                              const SizedBox(width: 6),
+                              Text(
+                                '(Oficial: ${_officialEur?.toStringAsFixed(2) ?? '--'} Bs)',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
                               ),
-                            ),
+                            ],
                           ),
-                          const SizedBox(width: 12.0),
-                          SizedBox(
-                            height: 48,
-                            width: 48,
-                            child: Builder(
-                              builder: (context) {
-                                final scheme =
-                                    Theme.of(context).colorScheme;
-                                final isDark =
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark;
-                                final Color bg = isDark
-                                    ? scheme.primaryContainer
-                                    : scheme.primary;
-                                final Color iconColor = isDark
-                                    ? scheme.onPrimaryContainer
-                                    : scheme.onPrimary;
-
-                                bool isSameAsOfficial = false;
-                                if (_officialEur != null) {
-                                  final currentText =
-                                  _eurController.text
-                                      .trim()
-                                      .replaceAll(',', '.');
-                                  final officialText =
-                                  _officialEur!.toStringAsFixed(2);
-                                  isSameAsOfficial =
-                                      currentText == officialText;
-                                }
-
-                                return ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    backgroundColor: bg,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                      BorderRadius.circular(10.0),
-                                    ),
+                          const SizedBox(height: 8.0),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _eurController,
+                                  keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
                                   ),
-                                  onPressed:
-                                  isSameAsOfficial || _officialEur == null
-                                      ? null
-                                      : () {
-                                    _restoreSingleToOfficial(
-                                      controller: _eurController,
-                                      officialValue: _officialEur,
-                                      overrideKey: _kEurOverrideKey,
-                                      currencyLabel: 'EUR',
+                                  inputFormatters: _twoDecimalInputFormatters,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Personalizado',
+                                    prefixText: 'EUR: ',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12.0),
+                              SizedBox(
+                                height: 48,
+                                width: 48,
+                                child: Builder(
+                                  builder: (context) {
+                                    final scheme =
+                                        Theme.of(context).colorScheme;
+                                    final isDark =
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark;
+                                    final Color bg = isDark
+                                        ? scheme.primaryContainer
+                                        : scheme.primary;
+                                    final Color iconColor = isDark
+                                        ? scheme.onPrimaryContainer
+                                        : scheme.onPrimary;
+
+                                    bool isSameAsOfficial = false;
+                                    if (_officialEur != null) {
+                                      final currentText =
+                                      _eurController.text
+                                          .trim()
+                                          .replaceAll(',', '.');
+                                      final officialText =
+                                      _officialEur!.toStringAsFixed(2);
+                                      isSameAsOfficial =
+                                          currentText == officialText;
+                                    }
+
+                                    return ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        padding: EdgeInsets.zero,
+                                        backgroundColor: bg,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                          BorderRadius.circular(10.0),
+                                        ),
+                                      ),
+                                      onPressed:
+                                      isSameAsOfficial || _officialEur == null
+                                          ? null
+                                          : () {
+                                        _restoreSingleToOfficial(
+                                          controller: _eurController,
+                                          officialValue: _officialEur,
+                                          overrideKey: _kEurOverrideKey,
+                                          currencyLabel: 'EUR',
+                                        );
+                                      },
+                                      child: Icon(
+                                        Icons.refresh_rounded,
+                                        size: 28,
+                                        color: iconColor,
+                                      ),
                                     );
                                   },
-                                  child: Icon(
-                                    Icons.refresh_rounded,
-                                    size: 28,
-                                    color: iconColor,
-                                  ),
-                                );
-                              },
-                            ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12.0),
-                      Row(
+                      const SizedBox(height: 16.0),
+                      // USDT a VES
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _usdtController,
-                              keyboardType:
-                              const TextInputType.numberWithOptions(
-                                decimal: true,
+                          Row(
+                            children: [
+                              const Text(
+                                'USDT a VES',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                              inputFormatters: _twoDecimalInputFormatters,
-                              decoration: const InputDecoration(
-                                labelText: 'USDT a VES',
-                                prefixText: 'USDT: ',
-                                border: OutlineInputBorder(),
+                              const SizedBox(width: 6),
+                              Text(
+                                '(${_officialUsdt?.toStringAsFixed(2) ?? '--'} Bs)',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
                               ),
-                            ),
+                            ],
                           ),
-                          const SizedBox(width: 12.0),
-                          SizedBox(
-                            height: 48,
-                            width: 48,
-                            child: Builder(
-                              builder: (context) {
-                                final scheme =
-                                    Theme.of(context).colorScheme;
-                                final isDark =
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark;
-                                final Color bg = isDark
-                                    ? scheme.primaryContainer
-                                    : scheme.primary;
-                                final Color iconColor = isDark
-                                    ? scheme.onPrimaryContainer
-                                    : scheme.onPrimary;
-
-                                bool isSameAsOfficial = false;
-                                if (_officialUsdt != null) {
-                                  final currentText = _usdtController.text
-                                      .trim()
-                                      .replaceAll(',', '.');
-                                  final officialText =
-                                  _officialUsdt!.toStringAsFixed(2);
-                                  isSameAsOfficial =
-                                      currentText == officialText;
-                                }
-
-                                return ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    backgroundColor: bg,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                      BorderRadius.circular(10.0),
-                                    ),
+                          const SizedBox(height: 8.0),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _usdtController,
+                                  keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
                                   ),
-                                  onPressed:
-                                  isSameAsOfficial || _officialUsdt == null
-                                      ? null
-                                      : () {
-                                    _restoreSingleToOfficial(
-                                      controller: _usdtController,
-                                      officialValue: _officialUsdt,
-                                      overrideKey: _kUsdtOverrideKey,
-                                      currencyLabel: 'USDT',
+                                  inputFormatters: _twoDecimalInputFormatters,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Personalizado',
+                                    prefixText: 'USDT: ',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12.0),
+                              SizedBox(
+                                height: 48,
+                                width: 48,
+                                child: Builder(
+                                  builder: (context) {
+                                    final scheme =
+                                        Theme.of(context).colorScheme;
+                                    final isDark =
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark;
+                                    final Color bg = isDark
+                                        ? scheme.primaryContainer
+                                        : scheme.primary;
+                                    final Color iconColor = isDark
+                                        ? scheme.onPrimaryContainer
+                                        : scheme.onPrimary;
+
+                                    bool isSameAsOfficial = false;
+                                    if (_officialUsdt != null) {
+                                      final currentText = _usdtController.text
+                                          .trim()
+                                          .replaceAll(',', '.');
+                                      final officialText =
+                                      _officialUsdt!.toStringAsFixed(2);
+                                      isSameAsOfficial =
+                                          currentText == officialText;
+                                    }
+
+                                    return ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        padding: EdgeInsets.zero,
+                                        backgroundColor: bg,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                          BorderRadius.circular(10.0),
+                                        ),
+                                      ),
+                                      onPressed:
+                                      isSameAsOfficial || _officialUsdt == null
+                                          ? null
+                                          : () {
+                                        _restoreSingleToOfficial(
+                                          controller: _usdtController,
+                                          officialValue: _officialUsdt,
+                                          overrideKey: _kUsdtOverrideKey,
+                                          currencyLabel: 'USDT',
+                                        );
+                                      },
+                                      child: Icon(
+                                        Icons.refresh_rounded,
+                                        size: 28,
+                                        color: iconColor,
+                                      ),
                                     );
                                   },
-                                  child: Icon(
-                                    Icons.refresh_rounded,
-                                    size: 28,
-                                    color: iconColor,
-                                  ),
-                                );
-                              },
-                            ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -1398,22 +1584,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: const Text('Guardar cambios'),
                         ),
                       ),
-                      const SizedBox(height: 8.0),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _consultOfficialRates,
-                          style: ElevatedButton.styleFrom(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 12.0),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10.0),
-                            ),
-                          ),
-                          icon: const Icon(Icons.sync),
-                          label: const Text('Consultar montos oficiales'),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -1428,18 +1598,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 child: Padding(
                   padding:
-                      const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 16.0),
+                      const EdgeInsets.fromLTRB(16.0, 12.0, 8.0, 16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Última actualización',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Última actualización',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: _consultOfficialRates,
+                            icon: const Icon(Icons.sync),
+                            tooltip: 'Consultar montos oficiales',
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 4.0),
                       Text(
                         _lastRatesUpdate != null
                             ? '${_lastRatesUpdate!.day.toString().padLeft(2, '0')}/${_lastRatesUpdate!.month.toString().padLeft(2, '0')}/${_lastRatesUpdate!.year} ${_lastRatesUpdate!.hour.toString().padLeft(2, '0')}:${_lastRatesUpdate!.minute.toString().padLeft(2, '0')}'
@@ -1483,7 +1662,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
           ],
         ),
-      ),
     );
   }
 }
