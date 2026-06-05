@@ -119,14 +119,36 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     });
   }
 
+  /// Verifica si debe actualizar las tasas comparando la hora actual
+  /// con la hora de la última actualización guardada.
+  /// Retorna true si la hora (truncada) es diferente.
+  Future<bool> _shouldUpdateRates() async {
+    final prefs = await SharedPreferences.getInstance();
+    final int? lastUpdateMs = prefs.getInt(_kLastRatesUpdateTimestampKey);
+
+    // Si nunca se ha actualizado, debe actualizar
+    if (lastUpdateMs == null || lastUpdateMs <= 0) {
+      return true;
+    }
+
+    final DateTime lastUpdate = DateTime.fromMillisecondsSinceEpoch(lastUpdateMs);
+    final DateTime now = DateTime.now();
+
+    // Comparar año, mes, día y hora (ignorando minutos y segundos)
+    // Si cualquiera es diferente, debe actualizar
+    final bool sameHour = lastUpdate.year == now.year &&
+        lastUpdate.month == now.month &&
+        lastUpdate.day == now.day &&
+        lastUpdate.hour == now.hour;
+
+    return !sameHour;
+  }
+
   void _setupGlobalRatesScheduler() {
     _globalRatesTimer?.cancel();
 
     // Programar actualizaciones silenciosas cada hora en punto, usando
     // la hora local del dispositivo (por ejemplo 06:00, 07:00, etc.).
-    // NOTA: La consulta inicial se hace solo cuando se entra al modo
-    // "Cambio Monetario" en _initRatesIfMonetaryMode, para no bloquear
-    // el inicio de la app.
     void scheduleNext() {
       final now = DateTime.now();
       final next = DateTime(now.year, now.month, now.day, now.hour + 1);
@@ -375,8 +397,12 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       return;
     }
 
+    // Verificar si debe actualizar (hora diferente a la última actualización)
+    final bool shouldUpdate = await _shouldUpdateRates();
+
     if (!mounted) return;
 
+    // Cargar valores guardados temporalmente mientras se consulta al backend
     setState(() {
       for (final c in _currencyOptions) {
         if (c.code == 'USD' && lastUsd != null && lastUsd > 0) {
@@ -388,19 +414,27 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         }
       }
 
-      // Ya cargamos desde prefs: no estamos esperando ninguna consulta remota
-      _isLoadingRates = false;
+      // Si no debe actualizar, marcamos como completado
+      if (!shouldUpdate) {
+        _isLoadingRates = false;
+      }
     });
 
     // Al terminar una carga rápida desde prefs, ocultar el SnackBar de loading
-    // en caso de que estuviera visible.
-    if (mounted) {
+    // en caso de que estuviera visible (solo si no debe actualizar).
+    if (mounted && !shouldUpdate) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
     }
 
-    // Aunque tengamos valores guardados, consultar al backend en segundo plano
-    // para verificar si hay nuevos valores (sin bloquear la UI)
-    _loadRatesWithRetry(maxAttempts: 3, silent: true);
+    if (shouldUpdate) {
+      // La hora es diferente: forzar actualización desde el backend
+      // ignore: avoid_print
+      print('Hour changed since last update - forcing refresh from backend');
+      await _loadRatesWithRetry(maxAttempts: 3, silent: false);
+    } else {
+      // La hora es la misma: verificar en segundo plano si hay cambios
+      _loadRatesWithRetry(maxAttempts: 3, silent: true);
+    }
   }
 
   Future<void> _loadRatesWithRetry({
@@ -505,17 +539,42 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       );
     }
 
-    // Si es la primera vez, guardar también como overrides para que se usen inmediatamente
-    if (isFirstTime) {
-      if (rates.usdVes > 0) {
-        await prefs.setDouble(_kUsdOverrideKey, rates.usdVes);
-      }
-      if (rates.eurVes > 0) {
-        await prefs.setDouble(_kEurOverrideKey, rates.eurVes);
-      }
-      if (rates.usdtVes > 0) {
-        await prefs.setDouble(_kUsdtOverrideKey, rates.usdtVes);
-      }
+    // Verificar si el usuario tiene overrides personalizados
+    // Un override es "personalizado" si existe y es diferente al valor oficial anterior
+    final double? currentOverrideUsd = prefs.getDouble(_kUsdOverrideKey);
+    final double? currentOverrideEur = prefs.getDouble(_kEurOverrideKey);
+    final double? currentOverrideUsdt = prefs.getDouble(_kUsdtOverrideKey);
+
+    // Verificar si el usuario personalizó algún valor (override diferente al oficial anterior)
+    final bool hasCustomUsd = currentOverrideUsd != null &&
+        currentOverrideUsd > 0 &&
+        lastUsd != null &&
+        currentOverrideUsd != lastUsd;
+    final bool hasCustomEur = currentOverrideEur != null &&
+        currentOverrideEur > 0 &&
+        lastEur != null &&
+        currentOverrideEur != lastEur;
+    final bool hasCustomUsdt = currentOverrideUsdt != null &&
+        currentOverrideUsdt > 0 &&
+        lastUsdt != null &&
+        currentOverrideUsdt != lastUsdt;
+
+    // Si el usuario NO personalizó, actualizar los overrides con los nuevos valores oficiales
+    // para que se apliquen inmediatamente en la UI
+    if (!hasCustomUsd && rates.usdVes > 0) {
+      await prefs.setDouble(_kUsdOverrideKey, rates.usdVes);
+    }
+    if (!hasCustomEur && rates.eurVes > 0) {
+      await prefs.setDouble(_kEurOverrideKey, rates.eurVes);
+    }
+    if (!hasCustomUsdt && rates.usdtVes > 0) {
+      await prefs.setDouble(_kUsdtOverrideKey, rates.usdtVes);
+    }
+
+    // Actualizar timestamp de overrides si se actualizó alguno
+    if ((!hasCustomUsd && rates.usdVes > 0) ||
+        (!hasCustomEur && rates.eurVes > 0) ||
+        (!hasCustomUsdt && rates.usdtVes > 0)) {
       await prefs.setInt(
         _kOverridesTimestampKey,
         DateTime.now().millisecondsSinceEpoch,
@@ -1913,7 +1972,11 @@ class _CalculatorScreenState extends State<CalculatorScreen>
               : null,
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          padding: EdgeInsets.only(
+            left: 16.0,
+            right: 16.0,
+            bottom: 12.0 + MediaQuery.of(context).viewPadding.bottom,
+          ),
           child: Column(
             children: <Widget>[
               const SizedBox(height: 16.0),
