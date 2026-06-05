@@ -26,28 +26,26 @@ class RateService {
   //       para llegar a tu PC usa 10.0.2.2
   // ============================================================
 
-  // -------------------- URLs LOCALES (desarrollo) — ACTIVE --------------------
-  // Standalone backend (smart_calculator_backend) on port 3002.
-  // No '/api/calculator' prefix: there is no Gateway anymore, routes are at root.
-  // Desktop / iOS simulator / Flutter Web use 'localhost'.
-  // Android emulator must use '10.0.2.2' to reach the host machine.
+  // -------------------- URLs PRODUCCIÓN — ACTIVE --------------------
+  // Standalone backend (smart_calculator_backend) deployed on Render.
+  // Routes live at root (no '/api/calculator' prefix: there is no Gateway).
   static const _bcvBackendUrl =
-      'http://localhost:3002/bcv/rates';
+      'https://smart-calculator-backend-iodp.onrender.com/bcv/rates';
   static const _usdtBackendUrl =
-      'http://localhost:3002/binance/usdt-p2p?asset=USDT&fiat=VES';
+      'https://smart-calculator-backend-iodp.onrender.com/binance/usdt-p2p?asset=USDT&fiat=VES';
 
-  // Android emulator alternative:
+  // -------------------- URLs LOCALES (desarrollo) --------------------
+  // Uncomment to test against a local backend on port 3002.
+  // Desktop / iOS simulator / Flutter Web use 'localhost';
+  // Android emulator must use '10.0.2.2' to reach the host machine.
+  // static const _bcvBackendUrl =
+  //     'http://localhost:3002/bcv/rates';
+  // static const _usdtBackendUrl =
+  //     'http://localhost:3002/binance/usdt-p2p?asset=USDT&fiat=VES';
   // static const _bcvBackendUrl =
   //     'http://10.0.2.2:3002/bcv/rates';
   // static const _usdtBackendUrl =
   //     'http://10.0.2.2:3002/binance/usdt-p2p?asset=USDT&fiat=VES';
-
-  // -------------------- URLs PRODUCCIÓN (legacy multi-backend) --------------------
-  // TODO: replace with the new standalone backend URL once deployed.
-  // static const _bcvBackendUrl =
-  //     'https://multi-backend-5bta.onrender.com/api/calculator/bcv/rates';
-  // static const _usdtBackendUrl =
-  //     'https://multi-backend-5bta.onrender.com/api/calculator/binance/usdt-p2p?asset=USDT&fiat=VES';
 
   Future<ExchangeRates> fetchRates() async {
     final usdVes = await _fetchSingleFiat('USD');
@@ -78,10 +76,10 @@ class RateService {
 
     try {
       final response = await http.get(uri).timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 30),
         onTimeout: () {
           // ignore: avoid_print
-          print('BCV backend request timeout after 10 seconds');
+          print('BCV backend request timeout after 30 seconds');
           throw Exception('Request timeout');
         },
       );
@@ -111,10 +109,10 @@ class RateService {
 
     try {
       final response = await http.get(uri).timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 30),
         onTimeout: () {
           // ignore: avoid_print
-          print('USDT backend request timeout after 10 seconds');
+          print('USDT backend request timeout after 30 seconds');
           throw Exception('Request timeout');
         },
       );
