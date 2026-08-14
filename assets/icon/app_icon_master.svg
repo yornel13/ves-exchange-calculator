@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Smart Calculator — app icon (concept E3)</title>
+  <desc>Split background: dollar over cream on top, Bs in amber over deep blue below. Full bleed on purpose — iOS and Android apply their own corner mask. Colors come from the app's glass token set: cream #F4F1EC is keyOpaqueFill, #141B24 is backgroundBottom, amber #FAC775 is the accent reserved for bolivars.</desc>
+
+  <!-- Full bleed: never add rounded corners here, the platforms mask it. -->
+  <rect width="1024" height="1024" fill="#141B24"/>
+  <rect width="1024" height="512" fill="#F4F1EC"/>
+
+  <!-- Glyphs sit at 53% of the cream band and 46% of the deep band, which is
+       the optical balance the raster set uses. Convert to outlines before
+       handing this off, so the shapes do not depend on a local font. -->
+  <g font-family="SF Pro Display, -apple-system, Helvetica Neue, Arial, sans-serif" font-weight="600" text-anchor="middle">
+    <text x="512" y="271" font-size="270" fill="#22303F" dominant-baseline="central">$</text>
+    <text x="512" y="748" font-size="250" fill="#FAC775" dominant-baseline="central">Bs</text>
+  </g>
+</svg>

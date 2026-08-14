@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ves_exchange_calculator/components/calculator_screen.dart';
+import 'package:ves_exchange_calculator/theme/app_theme.dart';
 
 void main() {
   runApp(const MyApp());
@@ -61,8 +62,8 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Smart Calculator',
-      theme: ThemeData.light(),
-      darkTheme: ThemeData.dark(),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
       themeMode: _themeMode,
       home: CalculatorScreen(
         themeMode: _themeMode,

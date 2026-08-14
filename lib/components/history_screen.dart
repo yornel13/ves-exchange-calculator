@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:ves_exchange_calculator/services/history_service.dart';
 
+import 'package:ves_exchange_calculator/services/history_service.dart';
+import 'package:ves_exchange_calculator/theme/app_typography.dart';
+import 'package:ves_exchange_calculator/theme/glass_tokens.dart';
+import 'package:ves_exchange_calculator/utils/number_formatter.dart';
+import 'package:ves_exchange_calculator/widgets/app_toast.dart';
+import 'package:ves_exchange_calculator/widgets/glass_surface.dart';
+
+/// Past operations, shown in a bottom sheet. Tapping one puts it back on the
+/// display.
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
@@ -9,13 +17,8 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  late Future<List<HistoryEntry>> _futureHistory;
-
-  @override
-  void initState() {
-    super.initState();
-    _futureHistory = HistoryService.getHistory();
-  }
+  late Future<List<HistoryEntry>> _futureHistory =
+      HistoryService.getHistory();
 
   Future<void> _refresh() async {
     setState(() {
@@ -24,23 +27,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _clearHistory() async {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     final bool? confirm = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Borrar historial'),
-          content:
-              const Text('Se eliminarán todas las operaciones del historial.'),
-          actions: [
+          title: const Text('Borrar el historial'),
+          content: const Text(
+            'Se eliminarán todas las operaciones guardadas.',
+          ),
+          actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Cancelar'),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
               child: const Text('Borrar'),
             ),
           ],
@@ -54,125 +58,94 @@ class _HistoryScreenState extends State<HistoryScreen> {
     await _refresh();
 
     if (!mounted) return;
-
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.check_rounded,
-              size: 18,
-              color: colorScheme.onInverseSurface,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                'Historial eliminado.',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: colorScheme.onInverseSurface,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: colorScheme.inverseSurface.withOpacity(0.95),
-        behavior: SnackBarBehavior.floating,
-        elevation: 4,
-        duration: const Duration(seconds: 2),
-        margin: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16.0),
-        ),
-      ),
-    );
+    AppToast.show(context, 'Historial eliminado', icon: Icons.delete_outline);
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final GlassTokens glass = context.glass;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(height: 8),
-        // Handle superior para indicar que se puede arrastrar
+      children: <Widget>[
+        const SizedBox(height: 10),
+        // Handle: indica que el panel se puede arrastrar.
         Center(
           child: Container(
-            width: 40,
+            width: 38,
             height: 4,
             decoration: BoxDecoration(
-              color: theme.colorScheme.onSurface.withOpacity(0.2),
+              color: glass.textMuted,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          padding: const EdgeInsets.only(left: 20.0, right: 8.0),
           child: Row(
-            children: [
-              const Expanded(
+            children: <Widget>[
+              Expanded(
                 child: Text(
                   'Historial',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
+                  style: AppTypography.headerTitle.copyWith(
+                    color: glass.textPrimary,
                   ),
                 ),
               ),
               IconButton(
-                tooltip: 'Borrar historial',
+                tooltip: 'Borrar el historial',
                 onPressed: _clearHistory,
-                icon: const Icon(Icons.delete_outline),
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 20,
+                  color: glass.textSecondary,
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Expanded(
           child: FutureBuilder<List<HistoryEntry>>(
             future: _futureHistory,
-            builder: (context, snapshot) {
+            builder: (
+              BuildContext context,
+              AsyncSnapshot<List<HistoryEntry>> snapshot,
+            ) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              final entries = snapshot.data ?? const <HistoryEntry>[];
-
-              if (entries.isEmpty) {
                 return Center(
-                  child: Text(
-                    'Sin operaciones recientes',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(glass.textSecondary),
                     ),
                   ),
                 );
               }
 
+              final List<HistoryEntry> entries =
+                  snapshot.data ?? const <HistoryEntry>[];
+
+              if (entries.isEmpty) {
+                return _EmptyState(glass: glass);
+              }
+
               return RefreshIndicator(
                 onRefresh: _refresh,
                 child: ListView.separated(
-                  padding: const EdgeInsets.all(16.0),
-                  itemBuilder: (context, index) {
-                    final entry = entries[index];
-                    return InkWell(
-                      borderRadius: BorderRadius.circular(12.0),
-                      onTap: () {
-                        Navigator.of(context).pop(entry);
-                      },
-                      child: _buildHistoryItem(context, entry),
+                  padding: const EdgeInsets.fromLTRB(16.0, 4.0, 16.0, 20.0),
+                  itemCount: entries.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8.0),
+                  itemBuilder: (BuildContext context, int index) {
+                    return _HistoryTile(
+                      entry: entries[index],
+                      onTap: () => Navigator.of(context).pop(entries[index]),
                     );
                   },
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 8.0),
-                  itemCount: entries.length,
                 ),
               );
             },
@@ -181,50 +154,151 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ],
     );
   }
+}
 
-  Widget _buildHistoryItem(BuildContext context, HistoryEntry entry) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+class _HistoryTile extends StatelessWidget {
+  const _HistoryTile({required this.entry, required this.onTap});
 
-    final dt = DateTime.fromMillisecondsSinceEpoch(entry.timestampMs);
-    final String dateStr =
-        '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
-    final String timeStr =
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  final HistoryEntry entry;
+  final VoidCallback onTap;
 
-    return Card(
-      elevation: 4.0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12.0),
+  static const Map<String, IconData> _operationIcons = <String, IconData>{
+    'add': Icons.add_rounded,
+    'sub': Icons.remove_rounded,
+    'mul': Icons.close_rounded,
+    'div': Icons.percent_rounded,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final GlassTokens glass = context.glass;
+    final DateTime at = DateTime.fromMillisecondsSinceEpoch(entry.timestampMs);
+
+    String two(int value) => value.toString().padLeft(2, '0');
+    final String when =
+        '${two(at.day)}/${two(at.month)}/${at.year}  ${two(at.hour)}:${two(at.minute)}';
+
+    return Material(
+      color: glass.keyFillMuted,
+      borderRadius: BorderRadius.circular(18.0),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: glass.keyFill,
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Icon(
+                    _operationIcons[entry.operationType] ??
+                        Icons.drag_handle_rounded,
+                    size: 15,
+                    color: glass.textSecondary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      NumberFormatter.expression(entry.expression),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.expressionCompact.copyWith(
+                        color: glass.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      NumberFormatter.amount(entry.result),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.money.copyWith(
+                        fontSize: 19,
+                        color: glass.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                when,
+                style: AppTypography.chip.copyWith(
+                  fontSize: 11.5,
+                  color: glass.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      color: theme.brightness == Brightness.dark
-          ? const Color(0xFF26262A)
-          : null,
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.glass});
+
+  final GlassTokens glass;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.symmetric(horizontal: 32.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Fila 1: fecha y hora
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(Icons.history_rounded, size: 30, color: glass.textMuted),
+            const SizedBox(height: 12),
             Text(
-              '$dateStr  $timeStr',
+              'Todavía no hay operaciones',
               style: TextStyle(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontSize: 12,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: glass.textPrimary,
               ),
             ),
-            const SizedBox(height: 4.0),
-            // Fila 2: operación completa y resultado
+            const SizedBox(height: 6),
             Text(
-              '${entry.expression} = ${entry.result}',
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              'Lo que calcules aparecerá acá para volver a usarlo.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: glass.textMuted, height: 1.4),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Frame for the history sheet: a glass panel anchored to the bottom.
+class HistorySheet extends StatelessWidget {
+  const HistorySheet({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final double height = MediaQuery.of(context).size.height * 0.8;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: SizedBox(
+        height: height,
+        child: GlassPanel(
+          padding: EdgeInsets.zero,
+          borderRadius: 28.0,
+          fill: context.glass.sheetFill,
+          child: const HistoryScreen(),
         ),
       ),
     );

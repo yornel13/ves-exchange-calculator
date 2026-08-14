@@ -43,3 +43,14 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firma de release: NUNCA versionar el keystore ni sus contraseñas.
+# Perder el keystore impide publicar actualizaciones; filtrarlo permite
+# publicar en tu nombre.
+*.jks
+*.keystore
+key.properties
+/android/key.properties
+
+# Artefactos firmados listos para subir a Play
+/release/

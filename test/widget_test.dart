@@ -1,30 +1,40 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:ves_exchange_calculator/main.dart';
+import 'package:ves_exchange_calculator/components/calculator/calculator_keypad.dart';
+import 'package:ves_exchange_calculator/theme/app_theme.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  Widget keypad(void Function(String) onKeyPressed) => MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(body: CalculatorKeypad(onKeyPressed: onKeyPressed)),
+      );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  testWidgets('el teclado reporta la tecla pulsada', (WidgetTester tester) async {
+    final List<String> pressed = <String>[];
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpWidget(keypad(pressed.add));
+
+    await tester.tap(find.text('7'));
+    await tester.tap(find.text('+'));
+    await tester.tap(find.text('='));
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(pressed, <String>['7', '+', '=']);
+  });
+
+  testWidgets('el teclado expone todas las teclas del layout',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(keypad((_) {}));
+
+    for (final String label in <String>[
+      'C', '%', '÷', '×', '−', '+', '=', '.',
+      '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    ]) {
+      expect(find.text(label), findsOneWidget, reason: 'falta la tecla $label');
+    }
+
+    // DEL se dibuja como icono, no como texto.
+    expect(find.byIcon(Icons.backspace_outlined), findsOneWidget);
   });
 }

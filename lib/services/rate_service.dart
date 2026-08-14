@@ -26,26 +26,23 @@ class RateService {
   //       para llegar a tu PC usa 10.0.2.2
   // ============================================================
 
-  // -------------------- URLs PRODUCCIÓN — ACTIVE --------------------
-  // Standalone backend (smart_calculator_backend) deployed on Render.
-  // Routes live at root (no '/api/calculator' prefix: there is no Gateway).
-  static const _bcvBackendUrl =
-      'https://smart-calculator-backend-iodp.onrender.com/bcv/rates';
-  static const _usdtBackendUrl =
-      'https://smart-calculator-backend-iodp.onrender.com/binance/usdt-p2p?asset=USDT&fiat=VES';
+  // -------------------- ORIGEN DEL BACKEND --------------------
+  // Solo hay que cambiar esta línea para apuntar a otro entorno.
+  // Las rutas viven en la raíz (no hay prefijo '/api/calculator': no hay Gateway).
+  //
+  // PRODUCCIÓN — ACTIVE (Railway):
+  static const _backendOrigin =
+      'https://calculator-backend-production-8d11.up.railway.app';
 
-  // -------------------- URLs LOCALES (desarrollo) --------------------
-  // Uncomment to test against a local backend on port 3002.
-  // Desktop / iOS simulator / Flutter Web use 'localhost';
-  // Android emulator must use '10.0.2.2' to reach the host machine.
-  // static const _bcvBackendUrl =
-  //     'http://localhost:3002/bcv/rates';
-  // static const _usdtBackendUrl =
-  //     'http://localhost:3002/binance/usdt-p2p?asset=USDT&fiat=VES';
-  // static const _bcvBackendUrl =
-  //     'http://10.0.2.2:3002/bcv/rates';
-  // static const _usdtBackendUrl =
-  //     'http://10.0.2.2:3002/binance/usdt-p2p?asset=USDT&fiat=VES';
+  // LOCAL (desarrollo, puerto 3002):
+  // Escritorio / simulador iOS / Flutter Web usan 'localhost';
+  // el emulador de Android necesita '10.0.2.2' para llegar a tu máquina.
+  // static const _backendOrigin = 'http://localhost:3002';
+  // static const _backendOrigin = 'http://10.0.2.2:3002';
+
+  static const _bcvBackendUrl = '$_backendOrigin/bcv/rates';
+  static const _usdtBackendUrl =
+      '$_backendOrigin/binance/usdt-p2p?asset=USDT&fiat=VES';
 
   Future<ExchangeRates> fetchRates() async {
     final usdVes = await _fetchSingleFiat('USD');
